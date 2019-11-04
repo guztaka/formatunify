@@ -19,9 +19,10 @@ server.listen(process.env.PORT || 3000);
 // ルーター設定
 server.post('/bot/webhook', line.middleware(lineConfig), (req, res, next) => {
   res.sendStatus(200);
+  // eslint-disable-next-line no-console
   console.log(req.body);
   // すべてのイベント処理のプロミスを格納する配列。
-  let eventsProcessed = [];
+  const eventsProcessed = [];
 
   // イベントオブジェクトを順次処理。
   req.body.events.forEach((event) => {
