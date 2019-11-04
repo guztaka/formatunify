@@ -2,6 +2,7 @@
 // モジュールのインポート
 const server = require('express')();
 const line = require('@line/bot-sdk'); // Messaging APIのSDKをインポート
+const dialogflow = require('dialogflow');
 
 // -----------------------------------------------------------------------------
 // パラメータ設定
@@ -10,6 +11,15 @@ const lineConfig = {
   channelSecret: process.env.LINE_CHANNEL_SECRET, // 環境変数からChannel Secretをセットしています
 };
 const bot = new line.Client(lineConfig);
+
+// Dialogflowのクライアントインスタンスを作成
+const sessionClient = new dialogflow.SessionsClient({
+  project_id: process.env.GOOGLE_PROJECT_ID,
+  credentials: {
+    client_email: process.env.GOOGLE_CLIENT_EMAIL,
+    private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+  },
+});
 
 // -----------------------------------------------------------------------------
 // Webサーバー設定
@@ -28,22 +38,44 @@ server.post('/bot/webhook', line.middleware(lineConfig), (req, res, next) => {
   req.body.events.forEach((event) => {
     // この処理の対象をイベントタイプがメッセージで、かつ、テキストタイプだった場合に限定。
     if (event.type === 'message' && event.message.type === 'text') {
-      // ユーザーからのテキストメッセージが「こんにちは」だった場合のみ反応。
-      if (event.message.text === 'こんにちは') {
-        // replyMessage()で返信し、そのプロミスをeventsProcessedに追加。
-        eventsProcessed.push(bot.replyMessage(event.replyToken, {
-          type: 'text',
-          text: 'これはこれは',
-        }));
-      }
+      eventsProcessed.push(
+        sessionClient
+          .detectIntent({
+            session: sessionClient.sessionPath(
+              process.env.GOOGLE_PROJECT_ID,
+              event.source.userId,
+            ),
+            queryInput: {
+              text: {
+                text: event.message.text,
+                languageCode: 'ja',
+              },
+            },
+          })
+          .then((responses) => {
+            if (
+              responses[0].queryResult
+              && responses[0].queryResult.action === 'handle-weather-check'
+            ) {
+              let messageText;
+              if (responses[0].queryResult.parameters.fields.weather.stringValue) {
+                messageText = `毎度！${responses[0].queryResult.parameters.fields.weather.stringValue}ね。どちらにお届けしましょ？`;
+              } else {
+                messageText = '毎度！ご注文は？';
+              }
+              return bot.replyMessage(event.replyToken, {
+                type: 'text',
+                text: messageText,
+              });
+            }
+          }),
+      );
     }
   });
 
   // すべてのイベント処理が終了したら何個のイベントが処理されたか出力。
-  Promise.all(eventsProcessed).then(
-    (response) => {
-      // eslint-disable-next-line no-console
-      console.log(`${response.length} event(s) processed.`);
-    }
-  );
+  Promise.all(eventsProcessed).then((response) => {
+    // eslint-disable-next-line no-console
+    console.log(`${response.length} event(s) processed.`);
+  });
 });
